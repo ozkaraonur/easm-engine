@@ -17,3 +17,5 @@ class Settings(BaseSettings):
     service_concurrency: int = Field(default=20, ge=1)
     service_http_timeout: float = Field(default=10.0, gt=0)
     user_agent: str = "easm-engine/0.1"
+    exposure_concurrency: int = Field(default=20, ge=1)
+    exposure_http_timeout: float = Field(default=10.0, gt=0)

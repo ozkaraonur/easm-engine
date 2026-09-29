@@ -2,15 +2,17 @@ import asyncio
 import sys
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import urlsplit
 
 import typer
 from loguru import logger
 
 from easm.core.config import Settings
-from easm.core.models import ScanResult
+from easm.core.models import ScanResult, Service, Subdomain
 from easm.core.utils import normalize_domain
-from easm.pipeline import discover_services
+from easm.pipeline import discover_services, full_scan
 from easm.scanners.crtsh import CrtShScanner
+from easm.scanners.exposures import ExposureScanner
 
 app = typer.Typer(help="EASM engine: external attack surface discovery.", no_args_is_help=True)
 
@@ -38,6 +40,15 @@ def _print_services(result: ScanResult) -> None:
                 f"    {svc.url:<45} {svc.status_code or '-':<4} {tls:<11} "
                 f"server={svc.server or '-'} title={svc.title or '-'!r}"
             )
+    for err in result.errors:
+        typer.echo(f"  ERROR: {err}", err=True)
+
+
+def _print_findings(result: ScanResult) -> None:
+    findings = result.findings
+    typer.echo(f"{result.domain}: {len(findings)} exposure findings")
+    for f in findings:
+        typer.echo(f"  [{f.severity.upper():<8}] {f.url}  ({f.status_code})  {f.evidence}")
     for err in result.errors:
         typer.echo(f"  ERROR: {err}", err=True)
 
@@ -116,6 +127,71 @@ def services(
         typer.echo(f"Saved: {json_out}")
     if result.errors:
         raise typer.Exit(1)
+
+
+def _setup_logging(verbose: bool) -> None:
+    logger.remove()
+    logger.add(sys.stderr, level="DEBUG" if verbose else "WARNING")
+
+
+def _finish(result: ScanResult, json_out: Path | None) -> None:
+    if json_out:
+        json_out.write_text(result.model_dump_json(indent=2), encoding="utf-8")
+        typer.echo(f"Saved: {json_out}")
+    if result.errors:
+        raise typer.Exit(1)
+
+
+@app.command()
+def scan(
+    domain: Annotated[str, typer.Argument(help="Target domain, e.g. example.com")],
+    json_out: Annotated[
+        Path | None, typer.Option("--json", help="Write full result to this file")
+    ] = None,
+    verbose: Annotated[bool, typer.Option("--verbose", "-v")] = False,
+) -> None:
+    """Full pipeline: subdomains (crt.sh) -> web services -> exposure checks."""
+    _setup_logging(verbose)
+    try:
+        target = normalize_domain(domain)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from exc
+
+    result = asyncio.run(full_scan(target, Settings()))
+    _print_services(result)
+    _print_findings(result)
+    _finish(result, json_out)
+
+
+@app.command()
+def exposures(
+    url: Annotated[str, typer.Argument(help="Target base URL, e.g. https://example.com")],
+    json_out: Annotated[
+        Path | None, typer.Option("--json", help="Write full result to this file")
+    ] = None,
+    verbose: Annotated[bool, typer.Option("--verbose", "-v")] = False,
+) -> None:
+    """Run only the exposure checks against a single URL."""
+    _setup_logging(verbose)
+    parts = urlsplit(url if "://" in url else f"https://{url}")
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        typer.echo(f"Invalid URL: {url!r}", err=True)
+        raise typer.Exit(2)
+    scheme = "https" if parts.scheme == "https" else "http"
+    host = Subdomain(
+        name=parts.hostname,
+        services=[
+            Service(
+                port=parts.port or (443 if scheme == "https" else 80),
+                scheme=scheme,
+                url=f"{scheme}://{parts.netloc}/",
+            )
+        ],
+    )
+    result = asyncio.run(ExposureScanner(Settings(), hosts=[host]).scan(parts.hostname))
+    _print_findings(result)
+    _finish(result, json_out)
 
 
 if __name__ == "__main__":

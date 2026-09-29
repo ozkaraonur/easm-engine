@@ -3,6 +3,20 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+Severity = Literal["info", "low", "medium", "high", "critical"]
+SEVERITY_ORDER: tuple[Severity, ...] = ("critical", "high", "medium", "low", "info")
+
+
+class ExposureFinding(BaseModel):
+    """A sensitive file or misconfiguration exposed on a web service."""
+
+    check: str  # stable id, e.g. "git-head"
+    url: str
+    path: str
+    severity: Severity
+    evidence: str  # never contains raw secret values
+    status_code: int
+
 
 class Service(BaseModel):
     """An HTTP(S) service answering on a host:port."""
@@ -15,6 +29,7 @@ class Service(BaseModel):
     server: str | None = None
     tls_valid: bool | None = None  # None for plain HTTP
     tls_error: str | None = None
+    exposures: list[ExposureFinding] = Field(default_factory=list)
 
 
 class Subdomain(BaseModel):
@@ -40,6 +55,12 @@ class ScanResult(BaseModel):
     finished_at: datetime
     subdomains: list[Subdomain] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
+
+    @property
+    def findings(self) -> list[ExposureFinding]:
+        """All exposure findings, most severe first."""
+        found = [f for h in self.subdomains for s in h.services for f in s.exposures]
+        return sorted(found, key=lambda f: (SEVERITY_ORDER.index(f.severity), f.url))
 
     @property
     def active_count(self) -> int:
