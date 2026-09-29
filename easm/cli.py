@@ -11,6 +11,7 @@ from easm.core.config import Settings
 from easm.core.models import ScanResult, Service, Subdomain
 from easm.core.utils import normalize_domain
 from easm.pipeline import discover_services, full_scan
+from easm.reporting import render_dashboard, render_html, render_markdown
 from easm.scanners.crtsh import CrtShScanner
 from easm.scanners.exposures import ExposureScanner
 
@@ -148,6 +149,12 @@ def scan(
     json_out: Annotated[
         Path | None, typer.Option("--json", help="Write full result to this file")
     ] = None,
+    html_out: Annotated[
+        Path | None, typer.Option("--html", help="Write an HTML audit report to this file")
+    ] = None,
+    markdown_out: Annotated[
+        Path | None, typer.Option("--markdown", help="Write a Markdown report to this file")
+    ] = None,
     verbose: Annotated[bool, typer.Option("--verbose", "-v")] = False,
 ) -> None:
     """Full pipeline: subdomains (crt.sh) -> web services -> exposure checks."""
@@ -159,8 +166,13 @@ def scan(
         raise typer.Exit(2) from exc
 
     result = asyncio.run(full_scan(target, Settings()))
-    _print_services(result)
-    _print_findings(result)
+    render_dashboard(result)
+    if html_out:
+        html_out.write_text(render_html(result), encoding="utf-8")
+        typer.echo(f"Saved: {html_out}")
+    if markdown_out:
+        markdown_out.write_text(render_markdown(result), encoding="utf-8")
+        typer.echo(f"Saved: {markdown_out}")
     _finish(result, json_out)
 
 
