@@ -17,6 +17,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from loguru import logger
+from rich.console import Console
 
 from easm.core.config import Settings
 from easm.core.models import Service, Subdomain
@@ -42,7 +43,7 @@ class LeakyHandler(BaseHTTPRequestHandler):
         pass
 
 
-async def run(out_dir: Path) -> None:
+async def run(out_dir: Path, svg: Path | None) -> None:
     logger.remove()
     logger.add(sys.stderr, level="WARNING")
     server = ThreadingHTTPServer(("127.0.0.1", 0), LeakyHandler)
@@ -63,7 +64,11 @@ async def run(out_dir: Path) -> None:
         server.shutdown()
         server.server_close()
 
-    render_dashboard(result)
+    console = Console(record=svg is not None, width=100)
+    render_dashboard(result, console)
+    if svg:
+        svg.parent.mkdir(parents=True, exist_ok=True)
+        console.save_svg(str(svg), title="easm scan")
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "demo-report.html").write_text(render_html(result), encoding="utf-8")
     (out_dir / "demo-report.md").write_text(render_markdown(result), encoding="utf-8")
@@ -73,7 +78,9 @@ async def run(out_dir: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])  # type: ignore[union-attr]
     parser.add_argument("--out-dir", type=Path, default=Path("output"))
-    asyncio.run(run(parser.parse_args().out_dir))
+    parser.add_argument("--svg", type=Path, help="Also save the dashboard as an SVG screenshot")
+    args = parser.parse_args()
+    asyncio.run(run(args.out_dir, args.svg))
 
 
 if __name__ == "__main__":

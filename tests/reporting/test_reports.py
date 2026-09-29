@@ -105,3 +105,9 @@ def test_dashboard_renders_severity_table() -> None:
     out = buf.getvalue()
     for expected in ("example.com", "CRITICAL", "HIGH", "MEDIUM", "INFO", "443", "crt.sh timeout"):
         assert expected in out
+
+
+def test_html_severity_colours_are_scoped_to_badges() -> None:
+    # A bare `.critical{background}` would paint whole finding cards solid red.
+    page = render_html(_result())
+    assert ".badge.critical{" in page and "}.critical{" not in page
