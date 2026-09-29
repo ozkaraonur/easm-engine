@@ -1,0 +1,7 @@
+services:
+  easm:
+    build: .
+    image: easm
+    volumes:
+      - ./output:/reports
+    # docker compose run --rm easm scan example.com --html report.html --markdown report.md
