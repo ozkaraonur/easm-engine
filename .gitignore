@@ -26,6 +26,8 @@ htmlcov/
 output/
 results/
 *.log
+# Ad-hoc reports in the repo root
+/*.html
 
 # IDE / OS
 .vscode/

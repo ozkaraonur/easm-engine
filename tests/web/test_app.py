@@ -6,6 +6,7 @@ from streamlit.testing.v1 import AppTest
 from easm.core.config import Settings
 from easm.core.models import ScanResult
 from easm.web import logic
+from easm.web.demo import DEMO_DOMAIN
 from tests.web.test_logic import _finding, _result
 
 APP = str(Path(__file__).parents[2] / "easm" / "web" / "app.py")
@@ -20,7 +21,7 @@ def test_demo_button_and_scan(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr(logic, "run_scan", fake)
     at = AppTest.from_file(APP, default_timeout=30).run()
     at.button[0].click().run()  # Demo Hedef Yükle
-    assert at.text_input[0].value == logic.DEMO_DOMAIN
+    assert at.text_input[0].value == DEMO_DOMAIN
     at.button[1].click().run()  # Taramayı Başlat
     assert not at.exception
     assert [m.label for m in at.metric] == ["Assets", "Active", "Open ports", "Risk score"]

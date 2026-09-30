@@ -118,3 +118,13 @@ async def test_run_scan_skips_unselected(mock_scanners: list[str]) -> None:
     result = await run_scan("example.com", opts, Settings())
     assert mock_scanners == ["services"]
     assert result.findings[0].check == "env-file"
+
+
+async def test_demo_scan_finds_many_exposures() -> None:
+    from easm.web.demo import DEMO_DOMAIN
+
+    result = await run_scan(DEMO_DOMAIN, ScanOptions(), Settings())
+    checks = {f.check for f in result.findings}
+    assert {"git-head", "env-file", "backup-zip", "web-config", "robots-txt"} <= checks
+    assert risk_score(result) == 100
+    assert len(result.subdomains) >= 6

@@ -8,8 +8,8 @@ from easm.core.config import Settings
 from easm.core.models import ScanResult
 from easm.core.utils import normalize_domain
 from easm.reporting import render_html
+from easm.web.demo import DEMO_DOMAIN
 from easm.web.logic import (
-    DEMO_DOMAIN,
     ScanOptions,
     finding_rows,
     open_port_count,
@@ -88,6 +88,8 @@ def main() -> None:
     subs = st.checkbox("Subdomain enumeration", value=True)
     ports = st.checkbox("Port scan", value=True)
     files = st.checkbox("Sensitive file probing", value=True)
+    if domain_input == DEMO_DOMAIN:
+        st.caption("Offline demo: scans deliberately leaky local servers, no real network scan.")
     if files and not ports:
         st.caption("Sensitive file probing needs web services, so ports are scanned too.")
 

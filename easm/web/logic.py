@@ -9,8 +9,8 @@ from easm.core.models import ScanResult, Severity, Subdomain
 from easm.scanners.crtsh import CrtShScanner
 from easm.scanners.exposures import ExposureScanner
 from easm.scanners.services import ServiceScanner
+from easm.web.demo import DEMO_DOMAIN, run_demo_scan
 
-DEMO_DOMAIN: Final = "vulnweb.com"  # Acunetix's intentionally vulnerable public test target
 SEVERITY_WEIGHTS: Final[dict[Severity, int]] = {
     "critical": 40,
     "high": 20,
@@ -99,6 +99,10 @@ async def run_scan(
             progress(fraction, message)
 
     report(0.05, "Starting scan")
+    if domain == DEMO_DOMAIN:  # offline demo: local leaky servers, no real network scan
+        result = await run_demo_scan(progress)
+        report(1.0, "Scan complete")
+        return result
     if options.subdomains:
         report(0.10, "Enumerating subdomains (crt.sh + DNS)")
         result = await CrtShScanner(settings).scan(domain)
