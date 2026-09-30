@@ -6,6 +6,7 @@ import streamlit as st
 
 from easm.core.config import Settings
 from easm.core.models import ScanResult
+from easm.core.risk import risk_label, risk_score
 from easm.core.utils import normalize_domain
 from easm.reporting import render_html
 from easm.web.demo import DEMO_DOMAIN
@@ -14,9 +15,8 @@ from easm.web.logic import (
     finding_rows,
     open_port_count,
     port_rows,
-    risk_label,
-    risk_score,
     run_scan,
+    weakness_rows,
 )
 
 
@@ -56,10 +56,20 @@ def _render_results(result: ScanResult) -> None:
     else:
         st.caption("No open ports (or port scan not selected).")
 
+    weak = weakness_rows(result)
+    if weak:
+        st.subheader("TLS and software weaknesses")
+        st.dataframe(weak, hide_index=True)
+
     st.subheader("Subdomains")
     st.dataframe(
         [
-            {"Subdomain": s.name, "Active": s.is_active, "IPs": ", ".join(s.ips)}
+            {
+                "Subdomain": s.name,
+                "Active": s.is_active,
+                "IPs": ", ".join(s.ips),
+                "Sources": ", ".join(sorted(s.sources)),
+            }
             for s in result.subdomains
         ],
         hide_index=True,
@@ -89,7 +99,9 @@ def main() -> None:
     ports = st.checkbox("Port scan", value=True)
     files = st.checkbox("Sensitive file probing", value=True)
     if domain_input == DEMO_DOMAIN:
-        st.caption("Offline demo: scans deliberately leaky local servers, no real network scan.")
+        st.caption(
+            "Offline demo: file leaks are found on deliberately leaky local servers; host names, IPs and risky ports are sample data. No real network scan."
+        )
     if files and not ports:
         st.caption("Sensitive file probing needs web services, so ports are scanned too.")
 

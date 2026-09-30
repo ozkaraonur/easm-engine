@@ -112,3 +112,22 @@ async def test_input_hosts_are_not_mutated(fake_open_ports: None) -> None:
         respx.get(url__regex=r".*").mock(return_value=httpx.Response(200))
         await ServiceScanner(Settings(), hosts=[host]).scan("example.com")
     assert host.open_ports == [] and host.services == []
+
+
+async def test_risky_ports_get_banner_and_finding(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def _scan(host: str, ports: list[int], timeout: float = 3.0) -> list[int]:
+        return [22, 3389]
+
+    async def _banner(host: str, port: int, timeout: float = 3.0) -> str | None:
+        return "SSH-2.0-OpenSSH_7.4" if port == 22 else None
+
+    monkeypatch.setattr(services_mod, "scan_ports", _scan)
+    monkeypatch.setattr(services_mod, "grab_banner", _banner)
+    result = await _scanner().scan("example.com")
+    host = result.subdomains[0]
+    assert host.banners == {22: "SSH-2.0-OpenSSH_7.4"}
+    assert {f.check: f.severity for f in host.port_exposures} == {
+        "open-port-22": "low",
+        "open-port-3389": "critical",
+    }
+    assert "SSH-2.0-OpenSSH_7.4" in host.port_exposures[0].evidence

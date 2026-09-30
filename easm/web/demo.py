@@ -12,6 +12,7 @@ from typing import Final
 
 from easm.core.config import Settings
 from easm.core.models import ScanResult, Service, Subdomain
+from easm.core.ports import port_exposure
 from easm.scanners.exposures import ExposureScanner
 
 DEMO_DOMAIN: Final = "demo.easm.test"
@@ -40,7 +41,24 @@ _HOSTS: Final[dict[str, tuple[str, dict[str, bytes]]]] = {
     ),
     f"api.{DEMO_DOMAIN}": ("gunicorn/21.2", {"/robots.txt": _ROBOTS}),
 }
-_MAIL_ONLY: Final = (f"mail.{DEMO_DOMAIN}", [25, 587, 993])
+_MAIL: Final = f"mail.{DEMO_DOMAIN}"
+# Sample data: risky ports per host with their (synthetic) banners.
+_RISKY: Final[dict[str, dict[int, str | None]]] = {
+    f"dev.{DEMO_DOMAIN}": {22: "SSH-2.0-OpenSSH_7.4", 6379: None},
+    f"staging.{DEMO_DOMAIN}": {22: "SSH-2.0-OpenSSH_7.4", 3306: "5.7.31-log"},
+    f"admin.{DEMO_DOMAIN}": {3389: None, 445: None},
+    f"api.{DEMO_DOMAIN}": {9200: None},
+    _MAIL: {25: "220 mail.demo.easm.test ESMTP Postfix", 21: "220 FTP server ready"},
+}
+
+
+def _add_risky_ports(host: Subdomain) -> None:
+    for port, banner in _RISKY.get(host.name, {}).items():
+        host.open_ports = sorted({*host.open_ports, port})
+        if banner:
+            host.banners[port] = banner
+        if finding := port_exposure(host.name, port, banner):
+            host.port_exposures.append(finding)
 
 
 def _server(server_header: str, files: dict[str, bytes]) -> ThreadingHTTPServer:
@@ -75,7 +93,7 @@ async def run_demo_scan(progress: Callable[[float, str], None] | None = None) ->
                     name=name,
                     is_active=True,
                     ips=[f"203.0.113.{i}"],
-                    open_ports=[80, 443, port] if name.startswith("admin") else [80, 443],
+                    open_ports=[80, 443],
                     services=[
                         Service(
                             port=port,
@@ -88,11 +106,10 @@ async def run_demo_scan(progress: Callable[[float, str], None] | None = None) ->
                     ],
                 )
             )
-        mail, mail_ports = _MAIL_ONLY
-        hosts.append(
-            Subdomain(name=mail, is_active=True, ips=["203.0.113.50"], open_ports=mail_ports)
-        )
+        hosts.append(Subdomain(name=_MAIL, is_active=True, ips=["203.0.113.50"], open_ports=[587]))
         hosts.append(Subdomain(name=f"old.{DEMO_DOMAIN}", is_active=False))
+        for host in hosts:
+            _add_risky_ports(host)
         if progress:
             progress(0.5, "Probing sensitive files")
         exposed = await ExposureScanner(Settings(), hosts=[h for h in hosts if h.services]).scan(

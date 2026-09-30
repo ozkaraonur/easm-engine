@@ -62,6 +62,7 @@ async def test_detects_real_exposures_on_normal_404_server() -> None:
     respx.get(f"{BASE}/robots.txt").mock(return_value=httpx.Response(200, text="Disallow: /a"))
     respx.get(f"{BASE}/web.config").mock(return_value=httpx.Response(404))
     respx.get(f"{BASE}/.well-known/security.txt").mock(return_value=httpx.Response(403))
+    respx.get(url__regex=rf"{BASE}/.*").mock(return_value=httpx.Response(404))
 
     result = await _scanner().scan("example.com")
     by_check = {f.check: f for f in result.findings}

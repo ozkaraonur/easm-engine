@@ -5,16 +5,15 @@ from pytest import MonkeyPatch
 
 from easm.core.config import Settings
 from easm.core.models import ExposureFinding, ScanResult, Service, Subdomain
-from easm.scanners.crtsh import CrtShScanner
+from easm.core.risk import risk_label, risk_score
 from easm.scanners.exposures import ExposureScanner
 from easm.scanners.services import ServiceScanner
+from easm.web import logic
 from easm.web.logic import (
     ScanOptions,
     finding_rows,
     open_port_count,
     port_rows,
-    risk_label,
-    risk_score,
     run_scan,
 )
 
@@ -34,7 +33,7 @@ def _finding(severity: str = "critical") -> ExposureFinding:
     )
 
 
-def _result(*findings: ExposureFinding) -> ScanResult:
+def _result(*findings: ExposureFinding, name: str = "www.example.com") -> ScanResult:
     svc = Service(
         port=443,
         scheme="https",
@@ -43,7 +42,7 @@ def _result(*findings: ExposureFinding) -> ScanResult:
         server="nginx",
         exposures=list(findings),
     )
-    host = Subdomain(name="www.example.com", is_active=True, open_ports=[80, 443], services=[svc])
+    host = Subdomain(name=name, is_active=True, open_ports=[80, 443], services=[svc])
     return ScanResult(
         scanner="t", domain="example.com", started_at=NOW, finished_at=NOW, subdomains=[host]
     )
@@ -76,12 +75,12 @@ def test_options_imply_services() -> None:
 @pytest.fixture
 def mock_scanners(monkeypatch: MonkeyPatch) -> list[str]:
     calls: list[str] = []
-    full = _result(_finding())
+    full = _result(_finding())  # ExposureScanner result
 
-    async def crtsh(self: CrtShScanner, domain: str) -> ScanResult:
-        calls.append("crtsh")
+    async def discover(domain: str, settings: Settings) -> ScanResult:
+        calls.append("discover")
         return ScanResult(
-            scanner="crtsh",
+            scanner="discovery",
             domain=domain,
             started_at=NOW,
             finished_at=NOW,
@@ -90,13 +89,14 @@ def mock_scanners(monkeypatch: MonkeyPatch) -> list[str]:
 
     async def services(self: ServiceScanner, domain: str) -> ScanResult:
         calls.append("services")
-        return full
+        assert self._hosts
+        return _result(_finding(), name=self._hosts[0].name)
 
     async def exposures(self: ExposureScanner, domain: str) -> ScanResult:
         calls.append("exposures")
         return full
 
-    monkeypatch.setattr(CrtShScanner, "scan", crtsh)
+    monkeypatch.setattr(logic, "discover_subdomains", discover)
     monkeypatch.setattr(ServiceScanner, "scan", services)
     monkeypatch.setattr(ExposureScanner, "scan", exposures)
     return calls
@@ -107,7 +107,7 @@ async def test_run_scan_all_modules(mock_scanners: list[str]) -> None:
     result = await run_scan(
         "example.com", ScanOptions(), Settings(), lambda f, m: updates.append((f, m))
     )
-    assert mock_scanners == ["crtsh", "services", "exposures"]
+    assert mock_scanners == ["discover", "services", "exposures"]
     assert len(result.findings) == 1
     fractions = [f for f, _ in updates]
     assert fractions == sorted(fractions) and fractions[-1] == 1.0
@@ -126,5 +126,6 @@ async def test_demo_scan_finds_many_exposures() -> None:
     result = await run_scan(DEMO_DOMAIN, ScanOptions(), Settings())
     checks = {f.check for f in result.findings}
     assert {"git-head", "env-file", "backup-zip", "web-config", "robots-txt"} <= checks
+    assert {"open-port-3389", "open-port-6379", "open-port-22"} <= checks
     assert risk_score(result) == 100
     assert len(result.subdomains) >= 6

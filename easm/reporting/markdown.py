@@ -47,7 +47,7 @@ def render_markdown(result: ScanResult) -> str:
             f"### {i}. [{f.severity.upper()}] {f.check}",
             "",
             f"- URL: {f.url}",
-            f"- HTTP status: {f.status_code}",
+            f"- HTTP status: {f.status_code or 'n/a (TCP)'}",
             f"- Evidence: {f.evidence}",
             f"- Remediation: {remediation_for(f.check)}",
             "",

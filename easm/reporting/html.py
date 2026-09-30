@@ -90,7 +90,7 @@ def render_html(result: ScanResult) -> str:
             f'<div class="card finding {escape(f.severity)}">{_badge(f.severity)} '
             f"<strong>{escape(f.check)}</strong>"
             f'<div><a href="{escape(f.url)}" rel="noopener noreferrer">{escape(f.url)}</a> '
-            f'<span class="mute">HTTP {f.status_code}</span></div>'
+            f'<span class="mute">{f"HTTP {f.status_code}" if f.status_code else "TCP"}</span></div>'
             f"<p><b>Evidence:</b> <code>{escape(f.evidence)}</code></p>"
             f"<p><b>Remediation:</b> {escape(remediation_for(f.check))}</p></div>"
         )

@@ -104,7 +104,8 @@ def subdomains(
 def services(
     domain: Annotated[str, typer.Argument(help="Target domain, e.g. example.com")],
     ports: Annotated[
-        str | None, typer.Option("--ports", help="Comma-separated ports (default 80,443,8080,8443)")
+        str | None,
+        typer.Option("--ports", help="Comma-separated ports (default: web + common risky ports)"),
     ] = None,
     json_out: Annotated[
         Path | None, typer.Option("--json", help="Write full result to this file")

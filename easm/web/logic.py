@@ -1,23 +1,14 @@
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Final
 
 from pydantic import BaseModel
 
 from easm.core.config import Settings
-from easm.core.models import ScanResult, Severity, Subdomain
-from easm.scanners.crtsh import CrtShScanner
-from easm.scanners.exposures import ExposureScanner
+from easm.core.models import ScanResult, Subdomain
+from easm.core.risk import weaknesses
+from easm.pipeline import discover_subdomains, probe_exposures
 from easm.scanners.services import ServiceScanner
 from easm.web.demo import DEMO_DOMAIN, run_demo_scan
-
-SEVERITY_WEIGHTS: Final[dict[Severity, int]] = {
-    "critical": 40,
-    "high": 20,
-    "medium": 8,
-    "low": 2,
-    "info": 0,
-}
 
 ProgressCallback = Callable[[float, str], None]
 
@@ -33,18 +24,6 @@ class ScanOptions(BaseModel):
     def needs_services(self) -> bool:
         """Exposure probing needs live web services, so it implies the port/service stage."""
         return self.ports or self.exposures
-
-
-def risk_score(result: ScanResult) -> int:
-    """0 (clean) to 100 (critical): summed severity weights, capped."""
-    return min(100, sum(SEVERITY_WEIGHTS[f.severity] for f in result.findings))
-
-
-def risk_label(score: int) -> str:
-    for threshold, label in ((70, "Critical"), (40, "High"), (15, "Medium"), (1, "Low")):
-        if score >= threshold:
-            return label
-    return "Clean"
 
 
 def open_port_count(result: ScanResult) -> int:
@@ -65,6 +44,7 @@ def port_rows(result: ScanResult) -> list[dict[str, str | int]]:
                     "Service": svc.scheme.upper() if svc else "tcp",
                     "Status": (svc.status_code or "-") if svc else "-",
                     "Server": (svc.server or "-") if svc else "-",
+                    "Banner": host.banners.get(port, "-"),
                     "Title": (svc.title or "-") if svc else "-",
                 }
             )
@@ -81,6 +61,10 @@ def finding_rows(result: ScanResult) -> list[dict[str, str | int]]:
         }
         for f in result.findings
     ]
+
+
+def weakness_rows(result: ScanResult) -> list[dict[str, str]]:
+    return [{"Host": w.host, "Weakness": w.kind, "Detail": w.detail} for w in weaknesses(result)]
 
 
 async def run_scan(
@@ -104,8 +88,8 @@ async def run_scan(
         report(1.0, "Scan complete")
         return result
     if options.subdomains:
-        report(0.10, "Enumerating subdomains (crt.sh + DNS)")
-        result = await CrtShScanner(settings).scan(domain)
+        report(0.10, "Enumerating subdomains (crt.sh, HackerTarget, DNS wordlist)")
+        result = await discover_subdomains(domain, settings)
         hosts = [h for h in result.subdomains if h.is_active]
     else:
         now = datetime.now(UTC)
@@ -122,18 +106,13 @@ async def run_scan(
     if options.needs_services:
         report(0.45, "Scanning ports and web services")
         services = await ServiceScanner(settings, hosts=hosts).scan(domain)
-        merged = {h.name: h for h in result.subdomains}
-        merged.update({h.name: h for h in services.subdomains})
+        known = {h.name: h for h in services.subdomains}
+        result.subdomains = [known.get(h.name, h) for h in result.subdomains]
         result.errors = [*result.errors, *services.errors]
-        web_hosts = [h for h in services.subdomains if h.services]
-        report(0.70, f"{len(web_hosts)} hosts with web services")
-
+        report(0.70, f"{sum(1 for h in result.subdomains if h.services)} hosts with web services")
         if options.exposures:
             report(0.75, "Probing sensitive files")
-            exposed = await ExposureScanner(settings, hosts=web_hosts).scan(domain)
-            merged.update({h.name: h for h in exposed.subdomains})
-            result.errors = [*result.errors, *exposed.errors]
-        result.subdomains = list(merged.values())
+            result = await probe_exposures(result, settings)
 
     result.finished_at = datetime.now(UTC)
     report(1.0, "Scan complete")

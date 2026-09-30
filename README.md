@@ -5,11 +5,14 @@
 A modular, asyncio-based **External Attack Surface Management** engine. Give it a domain and it
 maps what is exposed to the internet, then tells you what to fix first.
 
-- **Recon**: subdomain discovery from Certificate Transparency logs (crt.sh) plus DNS liveness checks.
-- **Port and service detection**: async TCP checks on web ports, then HTTP(S) fingerprinting
-  (status, title, server header, TLS validity).
-- **Exposure checks**: `.git/HEAD`, `.env`, `backup.zip`, `web.config`, `robots.txt`, `security.txt`,
-  with soft-404 protection and content validation to keep false positives low.
+- **Recon**: subdomains from Certificate Transparency (crt.sh), HackerTarget and a DNS wordlist
+  (wildcard-aware), merged and checked for DNS liveness. A failing source never aborts the scan.
+- **Ports and services**: async TCP checks on web ports plus risky ones (SSH, RDP, SMB, databases,
+  Redis, Elasticsearch...), passive banner grabbing, and HTTP(S) fingerprinting (status, title,
+  server header, TLS validity). Open risky ports become findings.
+- **Exposure checks**: 27 checks (`.git`, `.env`, SQL dumps, backups, keys, `phpinfo`, directory
+  listings, actuator/Swagger...) with soft-404 protection and content validation.
+- **Risk score**: 0-100 from findings, invalid TLS and end-of-life server software.
 - **Reporting**: Rich terminal dashboard, self-contained HTML report, Markdown report, JSON.
 
 Secrets are never reported: `.env` evidence shows `KEY=***` only.

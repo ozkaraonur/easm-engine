@@ -94,11 +94,146 @@ def validate_web_config(probe: Probe) -> str | None:
     return None
 
 
+def _plain(probe: Probe) -> str | None:
+    """Body text, or None when the response is an HTML page (usually a soft-404/login)."""
+    return None if _looks_like_html(probe.text) else probe.text
+
+
+def _regex_validator(pattern: str, evidence: str, flags: int = 0) -> Callable[[Probe], str | None]:
+    """Non-HTML body that matches `pattern` -> fixed evidence text (never echoes content)."""
+    compiled = re.compile(pattern, flags)
+
+    def validate(probe: Probe) -> str | None:
+        text = _plain(probe)
+        return evidence if text is not None and compiled.search(text) else None
+
+    return validate
+
+
+def _magic_validator(magic: bytes, evidence: str) -> Callable[[Probe], str | None]:
+    return lambda probe: evidence if probe.body.startswith(magic) else None
+
+
+def _contains_validator(needle: str, evidence: str) -> Callable[[Probe], str | None]:
+    return lambda probe: evidence if needle in probe.text else None
+
+
+def validate_phpinfo(probe: Probe) -> str | None:
+    if re.search(r"<title>\s*phpinfo\(\)|PHP Version\s*</?(?:td|h1)", probe.text, re.IGNORECASE):
+        return "phpinfo() page discloses PHP configuration and environment"
+    return None
+
+
+def validate_dir_listing(probe: Probe) -> str | None:
+    if re.search(r"<title>\s*Index of /", probe.text, re.IGNORECASE):
+        return "directory listing enabled"
+    return None
+
+
+def validate_phpmyadmin(probe: Probe) -> str | None:
+    if re.search(r"<title>[^<]*phpMyAdmin", probe.text, re.IGNORECASE):
+        return "phpMyAdmin login page reachable"
+    return None
+
+
+def validate_swagger(probe: Probe) -> str | None:
+    if re.search(r'"(?:swagger|openapi)"\s*:\s*"[23]', probe.text):
+        return "OpenAPI/Swagger definition publicly readable"
+    return None
+
+
+def validate_actuator_env(probe: Probe) -> str | None:
+    if '"propertySources"' in probe.text or '"activeProfiles"' in probe.text:
+        return "Spring Boot actuator /env readable (configuration and secrets metadata)"
+    return None
+
+
+_DUMP_RE = r"(?:CREATE TABLE|INSERT INTO|DROP TABLE IF EXISTS)\s"
+_HTPASSWD_RE = r"^[\w.@-]+:(?:\$apr1\$|\$2[aby]\$|\{SHA\})"
+_SQLITE = b"SQLite format 3"
+_SQL_DUMP = _regex_validator(_DUMP_RE, "SQL dump readable")
+
 CHECKS: tuple[Check, ...] = (
     Check("git-head", "/.git/HEAD", "critical", validate_git_head),
     Check("env-file", "/.env", "critical", validate_env),
+    Check(
+        "git-config",
+        "/.git/config",
+        "critical",
+        _regex_validator(r"^\[core\]", "git config readable", re.MULTILINE),
+    ),
+    Check(
+        "ssh-private-key",
+        "/.ssh/id_rsa",
+        "critical",
+        _regex_validator(r"-----BEGIN [A-Z ]*PRIVATE KEY-----", "private key material readable"),
+    ),
+    Check(
+        "aws-credentials",
+        "/.aws/credentials",
+        "critical",
+        _regex_validator(r"aws_access_key_id\s*=", "AWS credentials file readable (values hidden)"),
+    ),
+    Check(
+        "wp-config-backup",
+        "/wp-config.php.bak",
+        "critical",
+        _regex_validator(r"DB_PASSWORD", "WordPress config backup readable (values hidden)"),
+    ),
+    Check("sql-dump", "/dump.sql", "critical", _SQL_DUMP),
+    Check("database-sql", "/database.sql", "critical", _SQL_DUMP),
+    Check("backup-sql", "/backup.sql", "critical", _SQL_DUMP),
     Check("backup-zip", "/backup.zip", "high", validate_backup_zip),
+    Check(
+        "backup-targz",
+        "/backup.tar.gz",
+        "high",
+        _magic_validator(b"\x1f\x8b", "gzip archive signature in response body"),
+    ),
+    Check(
+        "htpasswd",
+        "/.htpasswd",
+        "high",
+        _regex_validator(_HTPASSWD_RE, "htpasswd credential hashes readable", re.MULTILINE),
+    ),
+    Check(
+        "sqlite-database",
+        "/db.sqlite3",
+        "high",
+        _magic_validator(_SQLITE, "SQLite database file downloadable"),
+    ),
+    Check(
+        "svn-database",
+        "/.svn/wc.db",
+        "high",
+        _magic_validator(_SQLITE, "Subversion working-copy database readable"),
+    ),
+    Check("actuator-env", "/actuator/env", "high", validate_actuator_env),
+    Check(
+        "npmrc",
+        "/.npmrc",
+        "high",
+        _regex_validator(r"_authToken\s*=", "npm auth token file readable (values hidden)"),
+    ),
+    Check("phpinfo", "/phpinfo.php", "medium", validate_phpinfo),
+    Check("phpinfo-info", "/info.php", "medium", validate_phpinfo),
+    Check(
+        "server-status",
+        "/server-status",
+        "medium",
+        _contains_validator("Apache Server Status", "Apache mod_status page readable"),
+    ),
+    Check("dir-listing", "/backup/", "medium", validate_dir_listing),
+    Check("dir-listing-uploads", "/uploads/", "medium", validate_dir_listing),
+    Check("phpmyadmin", "/phpmyadmin/", "medium", validate_phpmyadmin),
     Check("web-config", "/web.config", "medium", validate_web_config),
+    Check(
+        "ds-store",
+        "/.DS_Store",
+        "low",
+        _magic_validator(b"\x00\x00\x00\x01Bud1", "macOS .DS_Store leaks directory contents"),
+    ),
+    Check("swagger", "/swagger.json", "low", validate_swagger),
     Check("robots-txt", "/robots.txt", "info", validate_robots),
     Check("security-txt", "/.well-known/security.txt", "info", validate_security_txt),
 )

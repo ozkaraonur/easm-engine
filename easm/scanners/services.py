@@ -10,7 +10,8 @@ from loguru import logger
 from easm.core.base import BaseScanner
 from easm.core.config import Settings
 from easm.core.models import ScanResult, Service, Subdomain
-from easm.core.portcheck import scan_ports
+from easm.core.portcheck import grab_banner, scan_ports
+from easm.core.ports import RISKY_PORTS, port_exposure
 from easm.core.utils import normalize_domain
 
 HTTPS_PORTS = frozenset({443, 8443, 9443})
@@ -99,6 +100,7 @@ class ServiceScanner(BaseScanner):
         host.open_ports = await scan_ports(
             host.name, self.settings.service_ports, self.settings.port_timeout
         )
+        await self._annotate_risky_ports(host)
         probes = [
             self._probe(
                 host.name, port, "https" if port in HTTPS_PORTS else "http", secure, insecure
@@ -107,6 +109,18 @@ class ServiceScanner(BaseScanner):
             if port in HTTPS_PORTS or port in HTTP_PORTS
         ]
         host.services = [s for s in await asyncio.gather(*probes) if s is not None]
+
+    async def _annotate_risky_ports(self, host: Subdomain) -> None:
+        """Passive banner grab plus a finding for every open non-web risky port."""
+        risky = [p for p in host.open_ports if p in RISKY_PORTS]
+        banners = await asyncio.gather(
+            *(grab_banner(host.name, p, self.settings.port_timeout) for p in risky)
+        )
+        for port, banner in zip(risky, banners, strict=True):
+            if banner:
+                host.banners[port] = banner
+            if finding := port_exposure(host.name, port, banner):
+                host.port_exposures.append(finding)
 
     async def _probe(
         self,

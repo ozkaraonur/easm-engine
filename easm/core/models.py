@@ -44,6 +44,8 @@ class Subdomain(BaseModel):
     ips: list[str] = Field(default_factory=list)
     open_ports: list[int] = Field(default_factory=list)
     services: list[Service] = Field(default_factory=list)
+    banners: dict[int, str] = Field(default_factory=dict)  # port -> passive service banner
+    port_exposures: list[ExposureFinding] = Field(default_factory=list)  # risky open ports
 
 
 class ScanResult(BaseModel):
@@ -60,6 +62,7 @@ class ScanResult(BaseModel):
     def findings(self) -> list[ExposureFinding]:
         """All exposure findings, most severe first."""
         found = [f for h in self.subdomains for s in h.services for f in s.exposures]
+        found += [f for h in self.subdomains for f in h.port_exposures]
         return sorted(found, key=lambda f: (SEVERITY_ORDER.index(f.severity), f.url))
 
     @property
