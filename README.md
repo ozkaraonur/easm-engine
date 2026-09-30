@@ -65,6 +65,7 @@ easm scan example.com --html report.html --markdown report.md --json result.json
 easm subdomains example.com      # discovery only
 easm services example.com        # + open ports and web services
 easm exposures https://example.com   # exposure checks against one URL
+easm web                         # Streamlit dashboard (alias: easm ui) on http://127.0.0.1:8501
 ```
 
 No internet access? Run the offline demo, which scans a deliberately leaky local server:

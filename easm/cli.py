@@ -1,5 +1,7 @@
 import asyncio
+import subprocess
 import sys
+from importlib.util import find_spec
 from pathlib import Path
 from typing import Annotated
 from urllib.parse import urlsplit
@@ -204,6 +206,24 @@ def exposures(
     result = asyncio.run(ExposureScanner(Settings(), hosts=[host]).scan(parts.hostname))
     _print_findings(result)
     _finish(result, json_out)
+
+
+@app.command()
+def web(
+    port: Annotated[int, typer.Option("--port", help="Port for the web dashboard")] = 8501,
+    host: Annotated[str, typer.Option("--host", help="Address to bind")] = "127.0.0.1",
+) -> None:
+    """Launch the Streamlit web dashboard."""
+    if find_spec("streamlit") is None:
+        typer.echo("Streamlit is not installed: pip install streamlit", err=True)
+        raise typer.Exit(2)
+    script = Path(__file__).parent / "web" / "app.py"
+    cmd = [sys.executable, "-m", "streamlit", "run", str(script)]
+    cmd += ["--server.port", str(port), "--server.address", host]
+    raise typer.Exit(subprocess.call(cmd))
+
+
+app.command("ui", hidden=True)(web)
 
 
 if __name__ == "__main__":
